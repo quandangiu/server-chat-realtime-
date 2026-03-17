@@ -13,6 +13,7 @@ export interface IMessage extends Document {
     publicId: string;
   };
   replyTo: mongoose.Types.ObjectId;
+  aiCommandOf?: mongoose.Types.ObjectId | null;
   reactions: Map<string, mongoose.Types.ObjectId[]>;
   readBy: Array<{ user: mongoose.Types.ObjectId; readAt: Date }>;
   isEdited: boolean;
@@ -33,6 +34,7 @@ const messageSchema = new Schema({
     publicId: String,
   },
   replyTo:   { type: Schema.Types.ObjectId, ref: 'Message', default: null },
+  aiCommandOf: { type: Schema.Types.ObjectId, ref: 'Message', default: null },
   reactions: { type: Map, of: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: {} },
   readBy: [{
     user:   { type: Schema.Types.ObjectId, ref: 'User' },
@@ -45,6 +47,7 @@ const messageSchema = new Schema({
 
 messageSchema.index({ channel: 1, _id: -1 });
 messageSchema.index({ channel: 1, createdAt: -1 });
+messageSchema.index({ aiCommandOf: 1, isDeleted: 1 });
 messageSchema.index({ content: 'text' });
 
 export const Message = mongoose.model<IMessage>('Message', messageSchema);

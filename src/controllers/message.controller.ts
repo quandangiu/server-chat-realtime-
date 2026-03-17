@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { Message } from '../models/Message';
 import { Channel } from '../models/Channel';
+import { Workspace } from '../models/Workspace';
+import { User } from '../models/User';
 import { sendSuccess, sendError } from '../utils/apiResponse';
 import { encryptMessage, decryptMessage } from '../utils/encryption';
 import { getIO } from '../socket/instance';
@@ -143,20 +145,76 @@ export const deleteMessage = async (req: Request, res: Response, next: NextFunct
   try {
     const message = await Message.findById(req.params.id);
     if (!message) return sendError(res, 'NOT_FOUND', 'Message không tồn tại', 404);
-    if (message.sender.toString() !== req.userId)
-      return sendError(res, 'FORBIDDEN', 'Không có quyền xóa', 403);
+
+    const channel = await Channel.findById(message.channel).select('workspace members');
+    if (!channel) return sendError(res, 'NOT_FOUND', 'Channel không tồn tại', 404);
+
+    const isMember = channel.members.some((m: any) => String(m) === req.userId);
+    if (!isMember) return sendError(res, 'FORBIDDEN', 'Không phải member của channel', 403);
+
+    const workspace = await Workspace.findById(channel.workspace).select('members');
+    const memberRole = workspace?.members.find((m: any) => {
+      const uid = (m.user as any)?._id?.toString() || m.user?.toString();
+      return uid === req.userId;
+    })?.role;
+
+    const isOwnerOrAdmin = memberRole === 'owner' || memberRole === 'admin';
+    const isOwnMessage = message.sender.toString() === req.userId;
+
+    if (!isOwnerOrAdmin && !isOwnMessage) {
+      return sendError(res, 'FORBIDDEN', 'Member chỉ được xóa tin nhắn của mình', 403);
+    }
+
+    const originalContent = String(message.content || '').trim().toLowerCase();
 
     message.isDeleted = true;
     message.content = '';
     await message.save();
 
+    const deletedMessageIds = [String(message._id)];
+
+    const isAICommandMessage = originalContent.startsWith('@ai');
+
+    if (isAICommandMessage) {
+      const linked = await Message.findOne({
+        aiCommandOf: message._id,
+        isDeleted: false,
+      });
+
+      let aiReply = linked;
+      if (!aiReply) {
+        const aiUser = await User.findOne({ username: 'AI-Assistant' }).select('_id');
+        if (aiUser) {
+          const msgCreatedAt = new Date((message as any).createdAt || Date.now());
+          const upperWindow = new Date(msgCreatedAt.getTime() + 10 * 60 * 1000);
+          aiReply = await Message.findOne({
+            channel: message.channel,
+            sender: aiUser._id,
+            type: 'system',
+            isDeleted: false,
+            createdAt: { $gte: msgCreatedAt, $lte: upperWindow },
+            content: { $regex: /^\[AI Support\]/i },
+          }).sort({ createdAt: 1 });
+        }
+      }
+
+      if (aiReply) {
+        aiReply.isDeleted = true;
+        aiReply.content = '';
+        await aiReply.save();
+        deletedMessageIds.push(String(aiReply._id));
+      }
+    }
+
     // Broadcast realtime
     try {
       const io = getIO();
-      io.to(`channel:${message.channel}`).emit('message_deleted', {
-        messageId: message._id,
-        channelId: message.channel,
-      });
+      for (const messageId of deletedMessageIds) {
+        io.to(`channel:${message.channel}`).emit('message_deleted', {
+          messageId,
+          channelId: String(message.channel),
+        });
+      }
     } catch {}
 
     sendSuccess(res, null);

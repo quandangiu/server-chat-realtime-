@@ -5,6 +5,8 @@ export interface IWorkspace extends Document {
   name: string;
   slug: string;
   icon: string;
+  avatar: string | null;
+  aiEnabled: boolean;
   owner: mongoose.Types.ObjectId;
   members: Array<{
     user: mongoose.Types.ObjectId;
@@ -18,6 +20,8 @@ const workspaceSchema = new Schema({
   name:   { type: String, required: true, maxlength: 80 },
   slug:   { type: String, unique: true, lowercase: true },
   icon:   { type: String, default: '💬' },
+  avatar: { type: String, default: null },
+  aiEnabled: { type: Boolean, default: true },
   owner:  { type: Schema.Types.ObjectId, ref: 'User', required: true },
   members: [{
     user:     { type: Schema.Types.ObjectId, ref: 'User' },

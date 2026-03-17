@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { Message } from '../../models/Message';
 import { Channel } from '../../models/Channel';
+import { handleAIMessage } from './ai.handler';
 
 export const registerMessageHandlers = (io: Server, socket: Socket) => {
   const { userId } = socket;
@@ -35,6 +36,18 @@ export const registerMessageHandlers = (io: Server, socket: Socket) => {
       });
 
       io.to(`channel:${channelId}`).emit('new_message', { message });
+
+      void handleAIMessage({
+        io,
+        channelId,
+        workspaceId: String(channel.workspace),
+        senderId: userId,
+        content: content || '',
+        sourceMessageId: String(message._id),
+      }).catch((error) => {
+        console.error('AI handler error:', error);
+      });
+
       callback?.({ success: true, message });
     } catch (err: any) {
       callback?.({ error: err.message });

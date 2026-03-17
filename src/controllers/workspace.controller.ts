@@ -7,6 +7,7 @@ import { getIO } from '../socket/instance';
 export const createWorkspace = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, description } = req.body;
+
     const ws = await Workspace.create({
       name,
       description,
@@ -49,17 +50,65 @@ export const getWorkspaceById = async (req: Request, res: Response, next: NextFu
   } catch (err) { next(err); }
 };
 
+export const uploadAvatar = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ws = await Workspace.findById(req.params.id);
+    if (!ws) {
+      console.error('[AvatarUpload] Workspace not found:', req.params.id);
+      return sendError(res, 'NOT_FOUND', 'Workspace không tồn tại', 404);
+    }
+
+    const member = ws.members.find(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === req.userId;
+    });
+    if (!member || !['owner', 'admin'].includes(member.role)) {
+      console.error('[AvatarUpload] Permission denied for user:', req.userId);
+      return sendError(res, 'FORBIDDEN', 'Không đủ quyền', 403);
+    }
+
+    if (!req.file) {
+      console.error('[AvatarUpload] No file received in req.file');
+      return sendError(res, 'BAD_REQUEST', 'Vui lòng chọn ảnh', 400);
+    }
+
+    const avatarUrl = (req.file as any).path;
+    console.log('[AvatarUpload] Successfully uploaded to Cloudinary, URL:', avatarUrl);
+    ws.avatar = avatarUrl;
+    await ws.save();
+
+    try {
+      const io = getIO();
+      io.to(`workspace:${ws._id}`).emit('workspace_updated', ws);
+    } catch {}
+
+    sendSuccess(res, ws);
+  } catch (err: any) { 
+    console.error('[AvatarUpload] Fatal Error:', err.message, err.stack);
+    next(err); 
+  }
+};
+
 export const updateWorkspace = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const ws = await Workspace.findById(req.params.id);
     if (!ws) return sendError(res, 'NOT_FOUND', 'Workspace không tồn tại', 404);
 
-    const member = ws.members.find(m => m.user.toString() === req.userId);
+    const member = ws.members.find(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === req.userId;
+    });
     if (!member || !['owner', 'admin'].includes(member.role))
       return sendError(res, 'FORBIDDEN', 'Không đủ quyền', 403);
 
     Object.assign(ws, req.body);
     await ws.save();
+
+    try {
+      const io = getIO();
+      io.to(`workspace:${ws._id}`).emit('workspace_updated', ws);
+    } catch {}
+
     sendSuccess(res, ws);
   } catch (err) { next(err); }
 };
@@ -77,25 +126,83 @@ export const deleteWorkspace = async (req: Request, res: Response, next: NextFun
   } catch (err) { next(err); }
 };
 
+export const updateMemberRole = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ws = await Workspace.findById(req.params.id);
+    if (!ws) return sendError(res, 'NOT_FOUND', 'Workspace không tồn tại', 404);
+
+    const adminMember = ws.members.find(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === req.userId;
+    });
+    if (!adminMember || !['owner', 'admin'].includes(adminMember.role))
+      return sendError(res, 'FORBIDDEN', 'Không đủ quyền', 403);
+
+    const { role } = req.body;
+    if (!['owner', 'admin', 'member'].includes(role))
+      return sendError(res, 'BAD_REQUEST', 'Role không hợp lệ', 400);
+
+    const targetUserId = req.params.userId;
+    const targetMember = ws.members.find(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === targetUserId;
+    });
+
+    if (!targetMember)
+      return sendError(res, 'NOT_FOUND', 'Thành viên không nằm trong workspace', 404);
+
+    // Only owner can assign owner roles
+    if (role === 'owner' && adminMember.role !== 'owner') {
+      return sendError(res, 'FORBIDDEN', 'Chỉ owner mới có thể cấp quyền owner', 403);
+    }
+    
+    // Only owner can demote/promote another admin or owner
+    if (targetMember.role !== 'member' && adminMember.role !== 'owner' && targetUserId !== req.userId) {
+       return sendError(res, 'FORBIDDEN', 'Chỉ owner mới có thể thay đổi quyền của owner/admin khác', 403);
+    }
+
+    targetMember.role = role;
+    await ws.save();
+
+    try {
+      const io = getIO();
+      io.to(`workspace:${ws._id}`).emit('member_role_updated', {
+        workspaceId: ws._id,
+        userId: targetUserId,
+        role
+      });
+      io.to(`workspace:${ws._id}`).emit('workspace_updated', ws);
+    } catch {}
+
+    sendSuccess(res, ws);
+  } catch (err) { next(err); }
+};
+
 export const addMember = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const ws = await Workspace.findById(req.params.id);
     if (!ws) return sendError(res, 'NOT_FOUND', 'Workspace không tồn tại', 404);
 
-    const adminMember = ws.members.find(m => m.user.toString() === req.userId);
+    const adminMember = ws.members.find(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === req.userId;
+    });
     if (!adminMember || !['owner', 'admin'].includes(adminMember.role))
       return sendError(res, 'FORBIDDEN', 'Không đủ quyền', 403);
 
     const { userId } = req.body;
-    const alreadyMember = ws.members.some(m => m.user.toString() === userId);
+    const alreadyMember = ws.members.some(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === userId;
+    });
     if (alreadyMember) return sendError(res, 'CONFLICT', 'Đã là member', 409);
 
     ws.members.push({ user: userId, role: 'member', joinedAt: new Date() });
     await ws.save();
 
-    // Thêm vào tất cả public channels
+    // Thêm vào tất cả public + voice channels
     await Channel.updateMany(
-      { workspace: ws._id, type: 'public' },
+      { workspace: ws._id, type: { $in: ['public', 'voice'] } },
       { $addToSet: { members: userId } }
     );
 
@@ -117,11 +224,17 @@ export const removeMember = async (req: Request, res: Response, next: NextFuncti
     const ws = await Workspace.findById(req.params.id);
     if (!ws) return sendError(res, 'NOT_FOUND', 'Workspace không tồn tại', 404);
 
-    const adminMember = ws.members.find(m => m.user.toString() === req.userId);
+    const adminMember = ws.members.find(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === req.userId;
+    });
     if (!adminMember || !['owner', 'admin'].includes(adminMember.role))
       return sendError(res, 'FORBIDDEN', 'Không đủ quyền', 403);
 
-    ws.members = ws.members.filter(m => m.user.toString() !== req.params.userId) as any;
+    ws.members = ws.members.filter(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid !== req.params.userId;
+    }) as any;
     await ws.save();
 
     await Channel.updateMany(
@@ -151,13 +264,16 @@ export const joinByInvite = async (req: Request, res: Response, next: NextFuncti
     const ws = await Workspace.findOne({ inviteCode: req.params.inviteCode });
     if (!ws) return sendError(res, 'NOT_FOUND', 'Invite code không hợp lệ', 404);
 
-    const alreadyMember = ws.members.some(m => m.user.toString() === req.userId);
+    const alreadyMember = ws.members.some(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === req.userId;
+    });
     if (!alreadyMember) {
       ws.members.push({ user: req.userId as any, role: 'member', joinedAt: new Date() });
       await ws.save();
 
       await Channel.updateMany(
-        { workspace: ws._id, type: 'public' },
+        { workspace: ws._id, type: { $in: ['public', 'voice'] } },
         { $addToSet: { members: req.userId } }
       );
 

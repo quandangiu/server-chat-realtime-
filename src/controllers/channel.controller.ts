@@ -52,6 +52,16 @@ export const createChannel = async (req: Request, res: Response, next: NextFunct
 
 export const getChannelsByWorkspace = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Auto-sync: đảm bảo user thuộc tất cả public + voice channels
+    await Channel.updateMany(
+      {
+        workspace: req.params.workspaceId,
+        type: { $in: ['public', 'voice'] },
+        members: { $ne: req.userId },
+      },
+      { $addToSet: { members: req.userId } }
+    );
+
     const channels = await Channel.find({
       workspace: req.params.workspaceId,
       members: req.userId,
@@ -84,12 +94,40 @@ export const getChannelById = async (req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 };
 
+export const getChannelMembers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const channel = await Channel.findById(req.params.id).populate('members', '_id username email avatar');
+    if (!channel) return sendError(res, 'NOT_FOUND', 'Channel không tồn tại', 404);
+
+    const isMember = channel.members.some((m: any) => (m._id || m).toString() === req.userId);
+    if (!isMember) return sendError(res, 'FORBIDDEN', 'Không phải member', 403);
+
+    const visibleMembers = (channel.members as any[]).filter((m: any) => {
+      return m?.username !== 'AI-Assistant' && m?.email !== 'ai@chatapp.com';
+    });
+
+    sendSuccess(res, visibleMembers);
+  } catch (err) { next(err); }
+};
+
 export const updateChannel = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const channel = await Channel.findById(req.params.id);
     if (!channel) return sendError(res, 'NOT_FOUND', 'Channel không tồn tại', 404);
-    if (channel.createdBy.toString() !== req.userId)
-      return sendError(res, 'FORBIDDEN', 'Chỉ người tạo mới được sửa', 403);
+    
+    const ws = await Workspace.findById(channel.workspace);
+    const member = ws?.members.find(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === req.userId;
+    });
+    
+    // An admin, owner, or the exact creator can edit
+    const isAdminOrOwner = member && ['admin', 'owner'].includes(member.role);
+    const creatorId = (channel.createdBy as any)?._id?.toString() || channel.createdBy.toString();
+    
+    if (creatorId !== req.userId && !isAdminOrOwner) {
+      return sendError(res, 'FORBIDDEN', 'Chỉ người tạo hoặc quản trị viên mới được sửa', 403);
+    }
 
     Object.assign(channel, req.body);
     await channel.save();
@@ -108,8 +146,20 @@ export const deleteChannel = async (req: Request, res: Response, next: NextFunct
   try {
     const channel = await Channel.findById(req.params.id);
     if (!channel) return sendError(res, 'NOT_FOUND', 'Channel không tồn tại', 404);
-    if (channel.createdBy.toString() !== req.userId)
-      return sendError(res, 'FORBIDDEN', 'Chỉ người tạo mới được xóa', 403);
+    
+    const ws = await Workspace.findById(channel.workspace);
+    const member = ws?.members.find(m => {
+      const uid = (m.user as any)?._id?.toString() || m.user.toString();
+      return uid === req.userId;
+    });
+    
+    // An admin, owner, or the exact creator can delete
+    const isAdminOrOwner = member && ['admin', 'owner'].includes(member.role);
+    const creatorId = (channel.createdBy as any)?._id?.toString() || channel.createdBy.toString();
+    
+    if (creatorId !== req.userId && !isAdminOrOwner) {
+      return sendError(res, 'FORBIDDEN', 'Chỉ người tạo hoặc quản trị viên mới được xóa', 403);
+    }
 
     await Message.deleteMany({ channel: channel._id });
     const workspaceId = channel.workspace;

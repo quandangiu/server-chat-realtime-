@@ -5,6 +5,7 @@ import workspaceRoutes from './workspace.routes';
 import channelRoutes from './channel.routes';
 import messageRoutes from './message.routes';
 import fileRoutes from './file.routes';
+import taskRoutes from './task.routes';
 
 const router = Router();
 
@@ -14,5 +15,6 @@ router.use('/workspaces', workspaceRoutes);
 router.use('/channels', channelRoutes);
 router.use('/messages', messageRoutes);
 router.use('/files', fileRoutes);
+router.use('/tasks', taskRoutes);
 
 export default router;
