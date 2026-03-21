@@ -150,8 +150,17 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
     const task = await Task.findById(req.params.id);
     if (!task) return sendError(res, 'NOT_FOUND', 'Task không tồn tại', 404);
 
-    const hasAccess = await canAccessWorkspace(String(task.workspace), String(req.userId));
+    const userId = String(req.userId);
+    const hasAccess = await canAccessWorkspace(String(task.workspace), userId);
     if (!hasAccess) return sendError(res, 'FORBIDDEN', 'Không có quyền cập nhật task', 403);
+
+    const canManageAllWorkTasks = await isAdminOrOwner(String(task.workspace), userId);
+    const isOwnWorkTask = !!task.assignee && String(task.assignee) === userId;
+
+    // Work task: member chỉ được sửa task của chính mình (assignee)
+    if (task.taskType === 'work' && !canManageAllWorkTasks && !isOwnWorkTask) {
+      return sendError(res, 'FORBIDDEN', 'Member chỉ được sửa Work task của chính mình', 403);
+    }
 
     const patch = req.body || {};
     if (typeof patch.title === 'string') task.title = patch.title.trim();
@@ -163,8 +172,7 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
     if (typeof patch.priority === 'string') task.priority = patch.priority;
     if ('assignee' in patch) {
       if (task.taskType === 'work') {
-        const allowed = await isAdminOrOwner(String(task.workspace), String(req.userId));
-        if (!allowed) {
+        if (!canManageAllWorkTasks) {
           return sendError(res, 'FORBIDDEN', 'Chỉ admin/owner mới được assign Work task', 403);
         }
       }

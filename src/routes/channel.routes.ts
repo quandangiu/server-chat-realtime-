@@ -3,7 +3,7 @@ import { authenticate } from '../middleware/auth.middleware';
 import {
   createChannel, getChannelsByWorkspace, getChannelById,
   updateChannel, deleteChannel, createOrGetDM, getChannelKey,
-  getChannelMembers,
+  getChannelMembers, addChannelMember, removeChannelMember,
 } from '../controllers/channel.controller';
 
 const router = Router();
@@ -14,6 +14,8 @@ router.get('/workspace/:workspaceId', authenticate, getChannelsByWorkspace);
 router.get('/:id', authenticate, getChannelById);
 router.get('/:id/key', authenticate, getChannelKey);
 router.get('/:id/members', authenticate, getChannelMembers);
+router.post('/:id/members', authenticate, addChannelMember);
+router.delete('/:id/members/:userId', authenticate, removeChannelMember);
 router.put('/:id', authenticate, updateChannel);
 router.delete('/:id', authenticate, deleteChannel);
 

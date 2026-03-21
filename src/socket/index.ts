@@ -60,7 +60,8 @@ export const initSocket = (httpServer: http.Server) => {
     registerVoiceHandlers(io, socket);
 
     // Auto-remove từ voice khi disconnect
-    socket.on('disconnect', async () => {
+    socket.on('disconnect', async (reason) => {
+      console.log(`[Socket] User disconnected: ${socket.userId} (${reason})`);
       const currentVoiceChannel = (socket as any).currentVoiceChannel;
       if (currentVoiceChannel) {
         await removeFromVoice(io, currentVoiceChannel, socket.userId);
