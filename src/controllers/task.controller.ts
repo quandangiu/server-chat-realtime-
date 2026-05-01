@@ -123,7 +123,8 @@ export const getTasksByChannel = async (req: Request, res: Response, next: NextF
     const tasks = await Task.find(query)
       .sort({ createdAt: -1 })
       .populate('assignee', 'username avatar displayName')
-      .populate('createdBy', 'username avatar displayName');
+      .populate('createdBy', 'username avatar displayName')
+      .populate('comments.user', 'username avatar displayName');
 
     sendSuccess(res, tasks);
   } catch (err) { next(err); }
@@ -139,7 +140,8 @@ export const getTasksByWorkspace = async (req: Request, res: Response, next: Nex
       .sort({ createdAt: -1 })
       .limit(300)
       .populate('assignee', 'username avatar displayName')
-      .populate('createdBy', 'username avatar displayName');
+      .populate('createdBy', 'username avatar displayName')
+      .populate('comments.user', 'username avatar displayName');
 
     sendSuccess(res, tasks);
   } catch (err) { next(err); }
@@ -383,5 +385,36 @@ export const getMyTaskSummary = async (req: Request, res: Response, next: NextFu
     ]);
 
     sendSuccess(res, { pendingCount, overdueCount });
+  } catch (err) { next(err); }
+};
+
+export const addComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { content } = req.body;
+    if (!content || !content.trim()) {
+      return sendError(res, 'VALIDATION_ERROR', 'Nội dung bình luận không được trống', 400);
+    }
+
+    const task = await Task.findById(req.params.id);
+    if (!task) return sendError(res, 'NOT_FOUND', 'Task không tồn tại', 404);
+
+    const userId = String(req.userId);
+    const hasAccess = await canAccessWorkspace(String(task.workspace), userId);
+    if (!hasAccess) return sendError(res, 'FORBIDDEN', 'Không có quyền bình luận', 403);
+
+    task.comments = task.comments || [];
+    task.comments.push({
+      user: req.userId as any,
+      content: content.trim(),
+      createdAt: new Date(),
+    } as any);
+
+    await task.save();
+    await task.populate('assignee', 'username avatar displayName');
+    await task.populate('createdBy', 'username avatar displayName');
+    await task.populate('comments.user', 'username avatar displayName');
+
+    emitTaskUpdated(task);
+    sendSuccess(res, task);
   } catch (err) { next(err); }
 };

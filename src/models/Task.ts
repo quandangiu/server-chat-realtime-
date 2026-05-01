@@ -27,6 +27,12 @@ export interface ITask extends Document {
   pollExpiresAt?: Date | null;
   pollAnonymous?: boolean;
   pollMultiChoice?: boolean;
+  comments?: Array<{
+    _id: mongoose.Types.ObjectId;
+    user: mongoose.Types.ObjectId;
+    content: string;
+    createdAt: Date;
+  }>;
 }
 
 const taskSchema = new Schema(
@@ -77,6 +83,13 @@ const taskSchema = new Schema(
     pollExpiresAt: { type: Date, default: null },
     pollAnonymous: { type: Boolean, default: false },
     pollMultiChoice: { type: Boolean, default: false },
+    comments: [
+      {
+        user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        content: { type: String, required: true },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

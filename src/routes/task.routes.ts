@@ -10,6 +10,7 @@ import {
   voteTask,
   rsvpTask,
   getMyTaskSummary,
+  addComment,
 } from '../controllers/task.controller';
 
 const router = Router();
@@ -21,6 +22,7 @@ router.get('/workspace/:workspaceId', authenticate, getTasksByWorkspace);
 router.post('/:id/claim', authenticate, claimTask);
 router.post('/:id/vote', authenticate, voteTask);
 router.post('/:id/rsvp', authenticate, rsvpTask);
+router.post('/:id/comment', authenticate, addComment);
 router.put('/:id', authenticate, updateTask);
 router.delete('/:id', authenticate, deleteTask);
 
